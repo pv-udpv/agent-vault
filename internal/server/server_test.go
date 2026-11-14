@@ -2219,6 +2219,46 @@ func TestCredentialsListSuccess(t *testing.T) {
 	}
 }
 
+func TestCredentialsListIncludesUpdatedAt(t *testing.T) {
+	ms, token := setupMockStoreWithSession(t)
+	srv := newTestServer(withStore(ms))
+
+	when := time.Date(2026, 11, 14, 16, 0, 0, 0, time.UTC)
+	ms.credentials["root-ns-id:FOO"] = &store.Credential{
+		ID: "credential-FOO", VaultID: "root-ns-id", Key: "FOO", Type: "static",
+		Ciphertext: []byte("not-a-real-ciphertext"), UpdatedAt: when,
+	}
+	ms.credentials["root-ns-id:BAR"] = &store.Credential{
+		ID: "credential-BAR", VaultID: "root-ns-id", Key: "BAR", Type: "static",
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/credentials?vault=default", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp credentialsListResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := map[string]*string{}
+	for _, e := range resp.Credentials {
+		if e.Value != "" {
+			t.Fatalf("list without reveal must not return values, got one for %s", e.Key)
+		}
+		got[e.Key] = e.UpdatedAt
+	}
+	if got["FOO"] == nil || *got["FOO"] != "2026-11-14T16:00:00Z" {
+		t.Fatalf("FOO updated_at = %v, want 2026-11-14T16:00:00Z", got["FOO"])
+	}
+	if v, ok := got["BAR"]; !ok || v != nil {
+		t.Fatalf("BAR updated_at should be present-but-null (zero time), got ok=%v v=%v", ok, v)
+	}
+}
+
 func TestCredentialsListEmpty(t *testing.T) {
 	ms, token := setupMockStoreWithSession(t)
 	srv := newTestServer(withStore(ms))

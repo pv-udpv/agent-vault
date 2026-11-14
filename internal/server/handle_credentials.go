@@ -99,6 +99,9 @@ type credentialEntry struct {
 	// Unavailable marks a dynamic-secret row whose lease could not be minted
 	// (e.g. the machine identity lacks lease permission). No value is exposed.
 	Unavailable bool `json:"unavailable,omitempty"`
+	// UpdatedAt is when the stored value last changed (RFC 3339, UTC).
+	// Metadata only; lets external sync tools detect writes made outside them.
+	UpdatedAt *string `json:"updated_at,omitempty"`
 }
 
 type credentialsListResponse struct {
@@ -147,7 +150,7 @@ func (s *Server) handleCredentialsList(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusNotFound, fmt.Sprintf("Credential %q not found", keyFilter))
 			return
 		}
-		entry := credentialEntry{Key: cred.Key, Type: cred.Type}
+		entry := credentialEntry{Key: cred.Key, Type: cred.Type, UpdatedAt: credentialUpdatedAt(cred)}
 		if cred.Type == "oauth" && len(cred.Ciphertext) == 0 {
 			entry.Value = ""
 		} else {
@@ -179,7 +182,7 @@ func (s *Server) handleCredentialsList(w http.ResponseWriter, r *http.Request) {
 	isMember := s.isMemberOrAbove(r, ns.ID)
 	for i, cred := range creds {
 		keys[i] = cred.Key
-		entries[i] = credentialEntry{Key: cred.Key, Type: cred.Type}
+		entries[i] = credentialEntry{Key: cred.Key, Type: cred.Type, UpdatedAt: credentialUpdatedAt(&cred)}
 
 		if reveal {
 			if cred.Type == "oauth" && len(cred.Ciphertext) == 0 {
@@ -219,6 +222,16 @@ func (s *Server) handleCredentialsList(w http.ResponseWriter, r *http.Request) {
 		resp.Credentials = entries
 	}
 	jsonOK(w, resp)
+}
+
+// credentialUpdatedAt formats a credential's last-write time as RFC 3339 UTC,
+// or nil when the store did not record one.
+func credentialUpdatedAt(cred *store.Credential) *string {
+	if cred == nil || cred.UpdatedAt.IsZero() {
+		return nil
+	}
+	t := cred.UpdatedAt.UTC().Format(time.RFC3339)
+	return &t
 }
 
 // credentialTypeDynamic tags entries sourced from an Infisical dynamic-secret
